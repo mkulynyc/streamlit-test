@@ -5,6 +5,7 @@ Compatible with Python 3.10 and Streamlit Cloud.
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import re
 
 # Load dataset
