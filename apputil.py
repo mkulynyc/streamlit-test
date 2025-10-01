@@ -134,3 +134,37 @@ def get_styled_rating_table():
     ).set_caption("Movie Ratings Count per Year")
 
     return styled_table
+
+# Plot top N genres in the US over time
+def plot_top_us_genres(df_clean, top_n=5):
+    # Filter US projects with valid genres and release year
+    df_us = df_clean[df_clean['country'] == 'United States'].dropna(subset=['listed_in', 'release_year'])
+
+    # Split genres into separate rows
+    df_us_genres = df_us.assign(genre=df_us['listed_in'].str.split(', ')).explode('genre')
+
+    # Count occurrences by year
+    genre_counts = df_us_genres.groupby(['release_year', 'genre']).size().reset_index(name='count')
+
+    # Get top N genres overall
+    top_genres = genre_counts.groupby('genre')['count'].sum().sort_values(ascending=False).head(top_n).index
+    genre_counts_top = genre_counts[genre_counts['genre'].isin(top_genres)]
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(14, 6))
+    sns.lineplot(
+        data=genre_counts_top,
+        x='release_year',
+        y='count',
+        hue='genre',
+        marker='o',
+        ax=ax
+    )
+    ax.set_title(f'Top {top_n} Genres in the US Over Time')
+    ax.set_xlabel('Release Year')
+    ax.set_ylabel('Number of Projects')
+    ax.legend(title='Genre', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+
+    return fig
