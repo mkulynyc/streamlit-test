@@ -6,9 +6,6 @@ This app performs data exploration on a dataset.
 # Import statements
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import re
 import streamlit as st
 
 # Load data set
