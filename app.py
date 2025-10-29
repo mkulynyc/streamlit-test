@@ -1,29 +1,40 @@
-'''
-Streamlit Data Science Project Template
-'''
+# app.py
 
-from apputil import *
 import streamlit as st
+from apputil import load_data, recommend_movies
 
-st.set_page_config(page_title="Netflix Data Explorer", layout="wide")
+# Load and cache data
+@st.cache_data
+def get_data():
+    return load_data()
 
-st.title("🎬 Netflix Data Explorer")
+df = get_data()
 
-# Load and clean data
-df_raw = load_data()
-df_clean, _ = cleanNetflixData(df_raw)
+# Extract genres
+all_genres = sorted(set(g for sublist in df['genres_list'] for g in sublist if g))
 
-# Section 1: Ratings Table
-st.header("📊 Movie Ratings per Year")
-st.markdown("This table shows counts of movies by their ratings for each year since 2016.")
-styled_table = get_styled_rating_table()
-st.dataframe(styled_table, use_container_width=True)
+# UI
+st.title("🎬 Movie Recommender")
+st.markdown("**Available Genres:** " + ", ".join(all_genres))
 
-# Section 2: Genre Trends
-st.header("📈 Top Genres in the US Over Time")
-st.markdown("Explore how the most popular genres have evolved over time for US-based Netflix titles.")
+keywords_input = st.text_input("Enter keywords (comma-separated)", value="school")
+selected_genres = st.multiselect("Select genres", options=all_genres, default=["Classic"])
 
-top_n = st.sidebar.slider("Select number of top genres", min_value=3, max_value=10, value=5)
-fig = plot_top_us_genres(df_clean, top_n=top_n)
-st.pyplot(fig)
+col1, col2 = st.columns(2)
+with col1:
+    keyword_mode = st.radio("Keyword match mode", ["any", "all"], horizontal=True)
+with col2:
+    genre_mode = st.radio("Genre match mode", ["any", "all"], horizontal=True)
 
+top_n = st.slider("Number of recommendations", 1, 20, 10)
+
+if st.button("Get Recommendations"):
+    keywords = [k.strip() for k in keywords_input.split(',') if k.strip()]
+    results = recommend_movies(df, keywords, selected_genres, top_n,
+                               keyword_match_mode=keyword_mode,
+                               genre_match_mode=genre_mode)
+
+    if results.empty:
+        st.warning("No matches found.")
+    else:
+        st.dataframe(results.reset_index(drop=True), use_container_width=True)

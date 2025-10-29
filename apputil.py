@@ -9,9 +9,58 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 
-# Load dataset
-def load_data(file_path="./netflix_titles.csv"):
-    return pd.read_csv(file_path)
+def add_ratings(df):
+    ### -------- Step 1: Load IMDB Datasets -------- ###
+
+    # Load titles
+    basics = pd.read_csv(
+        "title.basics.tsv",
+        sep="\t",
+        na_values="\\N",
+        usecols=["tconst", "primaryTitle", "originalTitle", "startYear", "titleType"]
+    )
+    # Load ratings
+    ratings = pd.read_csv(
+        "title.ratings (1).tsv",
+        sep="\t",
+        na_values="\\N"
+    )
+
+
+    ### -------- Step 2: Merge Datasets -------- ###
+
+    imdb = basics.merge(ratings, on="tconst", how="inner")
+
+
+    ### -------- Step 3: Filter to Movies Only -------- ###
+
+    imdb_movies = imdb[imdb['titleType'] == "movie"].copy()
+
+
+    ### -------- Step 4: Merge with Netflix Movies -------- ###
+
+    # Uses clean movies data using Aidan's cleaning function, filter so type is movie
+    movie_ratings_data = df.merge(
+        imdb_movies,
+        how = "inner",
+        left_on="title",
+        right_on = "primaryTitle"
+    )
+
+    ### -------- Step 5: Drop Duplicate Movies -------- ###
+
+    # Sort the dataframe so that for each title, the row with the highest numVotes comes first
+    movie_ratings_data_sorted = movie_ratings_data.sort_values(by='numVotes', ascending=False)
+
+    # Drop duplicates based on 'title', keeping the first (which has the highest numVotes)
+    movie_ratings_data_deduped = movie_ratings_data_sorted.drop_duplicates(subset='title', keep='first')
+
+    # Optional: reset the index
+    movie_ratings_data_deduped = movie_ratings_data_deduped.reset_index(drop=True)
+    
+    return(movie_ratings_data_deduped)
+
+    
 
 # Data cleaning function
 def cleanNetflixData(df,
@@ -120,53 +169,55 @@ def cleanNetflixData(df,
 
     return (df, genres_exploded) if explodeGenres else (df, None)
 
-# Generate styled ratings table
-def get_styled_rating_table():
-    df = load_data()
-    df_clean, _ = cleanNetflixData(df)
-    df_movies = df_clean[df_clean['type'] == 'Movie'].copy()
 
-    df_movies_ratings = df_movies.dropna(subset=['release_year', 'rating'])
-    df_movies_ratings = df_movies_ratings[df_movies_ratings['release_year'] >= 2016]
+# Load dataset
+@st.cache_data
+def load_data(file_path="./netflix_titles.csv"):
+    df = pd.read_csv(file_path)
+    df, _ = cleanNetflixData(df)
+    df = add_ratings(df)
+    return df
 
-    rating_counts = df_movies_ratings.groupby(['release_year', 'rating']).size().unstack(fill_value=0)
+# Movie recommendation functions
+def keyword_match(df, keywords, match_mode='any'):
+    if match_mode == 'all':
+        return df[df['description'].apply(
+            lambda desc: all(re.search(re.escape(k), desc, re.IGNORECASE) for k in keywords)
+        )]
+    else:
+        pattern = '|'.join([re.escape(k) for k in keywords])
+        return df[df['description'].str.contains(pattern, case=False, na=False)]
 
-    styled_table = rating_counts.style.background_gradient(
-        cmap='YlGnBu', axis=None
-    ).set_caption("Movie Ratings Count per Year")
+def genre_filter(df, genre_list, match_mode='any'):
+    genre_list_lower = [g.lower() for g in genre_list]
 
-    return styled_table
+    def match_genres(g):
+        g_lower = [x.lower() for x in g if x]
+        if match_mode == 'all':
+            return all(genre in g_lower for genre in genre_list_lower)
+        else:
+            return any(genre in g_lower for genre in genre_list_lower)
 
-# Plot top N genres in the US over time
-def plot_top_us_genres(df_clean, top_n=5):
-    # Filter US projects with valid genres and release year
-    df_us = df_clean[df_clean['country'] == 'United States'].dropna(subset=['listed_in', 'release_year'])
+    return df[df['genres_list'].apply(match_genres)]
 
-    # Split genres into separate rows
-    df_us_genres = df_us.assign(genre=df_us['listed_in'].str.split(', ')).explode('genre')
+def recommend_movies(df, keywords=None, genres=None, top_n=10, keyword_match_mode='any', genre_match_mode='any'):
+    filtered = df.copy()
 
-    # Count occurrences by year
-    genre_counts = df_us_genres.groupby(['release_year', 'genre']).size().reset_index(name='count')
+    if keywords:
+        filtered = keyword_match(filtered, keywords, match_mode=keyword_match_mode)
 
-    # Get top N genres overall
-    top_genres = genre_counts.groupby('genre')['count'].sum().sort_values(ascending=False).head(top_n).index
-    genre_counts_top = genre_counts[genre_counts['genre'].isin(top_genres)]
+    if genres:
+        filtered = genre_filter(filtered, genres, match_mode=genre_match_mode)
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(14, 6))
-    sns.lineplot(
-        data=genre_counts_top,
-        x='release_year',
-        y='count',
-        hue='genre',
-        marker='o',
-        ax=ax
+    if filtered.empty:
+        return pd.DataFrame(columns=['title', 'averageRating', 'genres', 'description'])
+
+    return (
+        filtered
+        .sort_values(by='averageRating', ascending=False)
+        .loc[:, ['title', 'averageRating', 'genres', 'description']]
+        .head(top_n)
     )
-    ax.set_title(f'Top {top_n} Genres in the US Over Time')
-    ax.set_xlabel('Release Year')
-    ax.set_ylabel('Number of Projects')
-    ax.legend(title='Genre', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.xticks(rotation=90)
-    plt.tight_layout()
 
-    return fig
+
+
